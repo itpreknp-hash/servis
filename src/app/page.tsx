@@ -117,28 +117,20 @@ Hvala!
 
     // Map Supabase result to our Order[] shape.
     const mapped: Order[] = (data || []).map((row: any) => {
-      const customerRaw = row.customers;
-      const deviceRaw = row.devices;
+  // Uzimamo PRVI element iz niza (jer je join 1:n, ali u tvom slučaju ima samo 1)
+  const customer = (row.customers?.[0] || { id: '', ime: '', broj_telefona: '' }) as Customer;
+  const device = (row.devices?.[0] || { id: '', brand: '', model: '', imei: undefined }) as Device;
 
-      const customer: Customer = Array.isArray(customerRaw)
-        ? (customerRaw[0] ?? { id: '', ime: '', broj_telefona: '' })
-        : (customerRaw ?? { id: '', ime: '', broj_telefona: '' });
-
-      const device: Device = Array.isArray(deviceRaw)
-        ? (deviceRaw[0] ?? { id: '', brand: '', model: '', imei: undefined })
-        : (deviceRaw ?? { id: '', brand: '', model: '', imei: undefined });
-
-      return {
-        id: row.id,
-        created_at: row.created_at,
-        status: row.status,
-        opis_problema: row.opis_problema,
-        rok_zavrsetka: row.rok_zavrsetka,
-        customers: customer,
-        devices: device
-      };
-    });
-
+  return {
+    id: row.id,
+    created_at: row.created_at,
+    status: row.status,
+    opis_problema: row.opis_problema,
+    rok_zavrsetka: row.rok_zavrsetka,
+    customers: customer,
+    devices: device,
+  };
+});
     setOrders(mapped);
     setFilteredOrders(mapped);
   } catch (err) {
