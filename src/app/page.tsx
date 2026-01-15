@@ -96,62 +96,62 @@ Hvala!
   }, []);
 
   // --- helpers / API ---
-  const fetchOrders = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select(`
-          id, created_at, status, opis_problema, rok_zavrsetka,
-          customers(id, ime, broj_telefona),
-          devices(id, brand, model, imei)
-        `)
-        .order('created_at', { ascending: false });
+ // Zameni trenutnu fetchOrders funkciju ovim:
+const fetchOrders = async () => {
+  setLoading(true);
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        id, created_at, status, opis_problema, rok_zavrsetka,
+        customers(id, ime, broj_telefona),
+        devices(id, brand, model, imei)
+      `)
+      .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('fetchOrders supabase error', error);
-        setOrders([]);
-        setFilteredOrders([]);
-        setLoading(false);
-        return;
-      }
-
-      // Map Supabase result to our Order[] shape.
-      // Supabase can return relation fields as arrays (e.g. customers: Customer[]),
-      // while our Order interface expects a single Customer / Device object.
-      const mapped: Order[] = (data || []).map((row: any) => {
-        const customerRaw = row.customers;
-        const deviceRaw = row.devices;
-
-        const customer: Customer = Array.isArray(customerRaw)
-          ? (customerRaw[0] ?? { id: '', ime: '', broj_telefona: '' })
-          : (customerRaw ?? { id: '', ime: '', broj_telefona: '' });
-
-        const device: Device = Array.isArray(deviceRaw)
-          ? (deviceRaw[0] ?? { id: '', brand: '', model: '', imei: undefined })
-          : (deviceRaw ?? { id: '', brand: '', model: '', imei: undefined });
-
-        return {
-          id: row.id,
-          created_at: row.created_at,
-          status: row.status,
-          opis_problema: row.opis_problema,
-          rok_zavrsetka: row.rok_zavrsetka,
-          customers: customer,
-          devices: device
-        };
-      });
-
-      setOrders(mapped);
-      setFilteredOrders(mapped);
-    } catch (err) {
-      console.error('fetchOrders error', err);
+    if (error) {
+      console.error('fetchOrders supabase error', error);
       setOrders([]);
       setFilteredOrders([]);
-    } finally {
       setLoading(false);
+      return;
     }
-  };
+
+    // Map Supabase result to our Order[] shape.
+    // Supabase može vratiti relation polja kao nizove -> izvuci prvi element
+    const mapped: Order[] = (data || []).map((row: any) => {
+      const customerRaw = row.customers;
+      const deviceRaw = row.devices;
+
+      const customer: Customer = Array.isArray(customerRaw)
+        ? (customerRaw[0] ?? { id: '', ime: '', broj_telefona: '' })
+        : (customerRaw ?? { id: '', ime: '', broj_telefona: '' });
+
+      const device: Device = Array.isArray(deviceRaw)
+        ? (deviceRaw[0] ?? { id: '', brand: '', model: '', imei: undefined })
+        : (deviceRaw ?? { id: '', brand: '', model: '', imei: undefined });
+
+      return {
+        id: row.id,
+        created_at: row.created_at,
+        status: row.status,
+        opis_problema: row.opis_problema,
+        rok_zavrsetka: row.rok_zavrsetka,
+        customers: customer,
+        devices: device
+      };
+    });
+
+    setOrders(mapped);
+    setFilteredOrders(mapped);
+  } catch (err) {
+    console.error('fetchOrders error', err);
+    setOrders([]);
+    setFilteredOrders([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const fetchTemplates = async () => {
     try {
@@ -186,7 +186,7 @@ Hvala!
   const ensureDefaultTemplatesInDB = async () => {
     try {
       const payload = Object.entries({ ...templates, company: companyName }).map(([status, message]) => ({ status, message }));
-      await supabase.from('wa_templates').upsert(payload, { onConflict: ['status'] });
+      await supabase.from('wa_templates').upsert(payload, { onConflict: 'status' });
     } catch (err) {
       console.warn('Could not create default templates in DB:', err);
     }
@@ -434,7 +434,7 @@ Hvala!
     try {
       setTemplates(newTemplates);
       const payload = Object.entries({ ...newTemplates, company: companyName }).map(([status, message]) => ({ status, message }));
-      await supabase.from('wa_templates').upsert(payload, { onConflict: ['status'] });
+      await supabase.from('wa_templates').upsert(payload, { onConflict: 'status' });
       setShowModal('');
       alert('✅ Poruke i naziv firme sačuvani.');
     } catch (err) {
