@@ -6,13 +6,13 @@ import {
 } from 'lucide-react';
 
 interface Customer { id: string; ime: string; broj_telefona: string; }
-interface Device { id: string; brand: string; model: string; imei?: string; }
+interface Device { id: string; brand: string; model: string; imei?: string | null; }
 interface Order {
   id: string;
   created_at: string;
   status: string;
   opis_problema: string;
-  rok_zavrsetka?: string;
+  rok_zavrsetka?: string | null;
   customers: Customer;
   devices: Device;
 }
@@ -96,59 +96,62 @@ Hvala!
   }, []);
 
   // --- helpers / API ---
- const fetchOrders = async () => {
-  setLoading(true);
-  try {
-    const { data, error } = await supabase
-      .from('orders')
-      .select(`
-        id, created_at, status, opis_problema, rok_zavrsetka,
-        customers(id, ime, broj_telefona),
-        devices(id, brand, model, imei)
-      `)
-      .order('created_at', { ascending: false });
+  const fetchOrders = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select(`
+          id, created_at, status, opis_problema, rok_zavrsetka,
+          customers(id, ime, broj_telefona),
+          devices(id, brand, model, imei)
+        `)
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('fetchOrders supabase error', error);
+      if (error) {
+        console.error('fetchOrders supabase error', error);
+        setOrders([]);
+        setFilteredOrders([]);
+        setLoading(false);
+        return;
+      }
+
+      // Normalize Supabase result to our Order[] shape.
+      // Supabase may return relation fields as arrays; extract first element if so.
+      const raw = (data || []) as any[];
+      const mapped: Order[] = raw.map((row: any) => {
+        const customerRaw = row.customers;
+        const deviceRaw = row.devices;
+
+        const customer: Customer = Array.isArray(customerRaw)
+          ? (customerRaw[0] ?? { id: '', ime: '', broj_telefona: '' })
+          : (customerRaw ?? { id: '', ime: '', broj_telefona: '' });
+
+        const device: Device = Array.isArray(deviceRaw)
+          ? (deviceRaw[0] ?? { id: '', brand: '', model: '', imei: null })
+          : (deviceRaw ?? { id: '', brand: '', model: '', imei: null });
+
+        return {
+          id: row.id,
+          created_at: row.created_at,
+          status: row.status,
+          opis_problema: row.opis_problema,
+          rok_zavrsetka: row.rok_zavrsetka ?? null,
+          customers: customer,
+          devices: device
+        };
+      });
+
+      setOrders(mapped);
+      setFilteredOrders(mapped);
+    } catch (err) {
+      console.error('fetchOrders error', err);
       setOrders([]);
       setFilteredOrders([]);
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    // Normalizuj oblik: Supabase ponekad vraća relation polja kao nizove
-    const mapped: Order[] = (data || []).map((row: any) => {
-      const customerRaw = row.customers;
-      const deviceRaw = row.devices;
-
-      const customer: Customer = Array.isArray(customerRaw)
-        ? (customerRaw[0] ?? { id: '', ime: '', broj_telefona: '' })
-        : (customerRaw ?? { id: '', ime: '', broj_telefona: '' });
-
-      const device: Device = Array.isArray(deviceRaw)
-        ? (deviceRaw[0] ?? { id: '', brand: '', model: '', imei: undefined })
-        : (deviceRaw ?? { id: '', brand: '', model: '', imei: undefined });
-
-      return {
-        id: row.id,
-        created_at: row.created_at,
-        status: row.status,
-        opis_problema: row.opis_problema,
-        rok_zavrsetka: row.rok_zavrsetka,
-        customers: customer,
-        devices: device,
-      };
-    });
-
-    setOrders(mapped);
-    setFilteredOrders(mapped);
-  } catch (err) {
-    console.error('fetchOrders error', err);
-    setOrders([]);
-    setFilteredOrders([]);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const fetchTemplates = async () => {
     try {
@@ -158,7 +161,7 @@ Hvala!
 
       if (error) {
         // table may not exist — keep defaults
-        console.warn('Templates fetch error (ok to ignore if table missing):', error.message);
+        console.warn('Templates fetch error (ok to ignore if table missing):', (error as any).message ?? error);
         return;
       }
 
@@ -183,18 +186,19 @@ Hvala!
   const ensureDefaultTemplatesInDB = async () => {
     try {
       const payload = Object.entries({ ...templates, company: companyName }).map(([status, message]) => ({ status, message }));
+      // onConflict expects a string in these types
       await supabase.from('wa_templates').upsert(payload, { onConflict: 'status' });
     } catch (err) {
       console.warn('Could not create default templates in DB:', err);
     }
   };
 
-  const replacePlaceholders = (template: string, ctx: { ime?: string; brand?: string; model?: string; imei?: string; rok?: string; opis?: string; status?: string; order_id?: string }) => {
+  const replacePlaceholders = (template: string, ctx: { ime?: string; brand?: string; model?: string; imei?: string | null; rok?: string; opis?: string; status?: string; order_id?: string }) => {
     return template
       .replace(/{{\s*ime\s*}}/gi, ctx.ime || '')
       .replace(/{{\s*brand\s*}}/gi, ctx.brand || '')
       .replace(/{{\s*model\s*}}/gi, ctx.model || '')
-      .replace(/{{\s*imei\s*}}/gi, ctx.imei || 'N/A')
+      .replace(/{{\s*imei\s*}}/gi, ctx.imei ?? 'N/A')
       .replace(/{{\s*rok\s*}}/gi, ctx.rok || '')
       .replace(/{{\s*opis\s*}}/gi, ctx.opis || '')
       .replace(/{{\s*status\s*}}/gi, ctx.status || '')
@@ -258,7 +262,6 @@ Hvala!
         .eq('id', orderId)
         .select();
 
-      console.log('Supabase update result:', res);
       // Normalize response
       const anyRes: any = res as any;
       if (anyRes.error) {
@@ -313,8 +316,8 @@ Hvala!
         .eq('broj_telefona', newOrder.broj.trim())
         .single();
 
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        throw new Error(`Greška pri proveri korisnika: ${fetchError.message}`);
+      if (fetchError && (fetchError as any).code !== 'PGRST116') {
+        throw new Error(`Greška pri proveri korisnika: ${(fetchError as any).message || fetchError}`);
       }
 
       if (existingCustomer) {
@@ -333,7 +336,7 @@ Hvala!
           .single();
 
         if (insertError || !newCustomer) {
-          throw new Error(`Greška pri kreiranju korisnika: ${insertError?.message}`);
+          throw new Error(`Greška pri kreiranju korisnika: ${(insertError as any)?.message || insertError}`);
         }
         customer = newCustomer;
       }
@@ -371,7 +374,7 @@ Hvala!
           .single();
 
         if (deviceError || !device) {
-          throw new Error(`Greška pri kreiranju uređaja: ${deviceError?.message}`);
+          throw new Error(`Greška pri kreiranju uređaja: ${(deviceError as any)?.message || deviceError}`);
         }
 
         const { error: orderError } = await supabase
@@ -385,7 +388,7 @@ Hvala!
           });
 
         if (orderError) {
-          throw new Error(`Greška pri kreiranju naloga: ${orderError.message}`);
+          throw new Error(`Greška pri kreiranju naloga: ${(orderError as any).message || orderError}`);
         }
 
         // WhatsApp using template (primljen)
