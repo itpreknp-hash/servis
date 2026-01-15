@@ -96,8 +96,7 @@ Hvala!
   }, []);
 
   // --- helpers / API ---
- // Zameni trenutnu fetchOrders funkciju ovim:
-const fetchOrders = async () => {
+ const fetchOrders = async () => {
   setLoading(true);
   try {
     const { data, error } = await supabase
@@ -113,12 +112,10 @@ const fetchOrders = async () => {
       console.error('fetchOrders supabase error', error);
       setOrders([]);
       setFilteredOrders([]);
-      setLoading(false);
       return;
     }
 
     // Map Supabase result to our Order[] shape.
-    // Supabase može vratiti relation polja kao nizove -> izvuci prvi element
     const mapped: Order[] = (data || []).map((row: any) => {
       const customerRaw = row.customers;
       const deviceRaw = row.devices;
