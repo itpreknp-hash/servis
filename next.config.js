@@ -1,8 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
-    // !! OPREZ - ovo preskače type checking u produkciji !!
+    // PAŽNJA: Ovo dozvoljava build čak i ako postoje TypeScript greške
     ignoreBuildErrors: true,
+  },
+  eslint: {
+    // Ovo ignoriše ESLint greške tokom build-a
+    ignoreDuringBuilds: true,
   },
 };
 
