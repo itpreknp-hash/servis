@@ -1,12 +1,15 @@
 'use client';
+
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import {
-  Plus, X, Edit3, Send, Search, Printer, Calendar, User, Phone
-} from 'lucide-react';
+  Plus, X, Edit3, Send, Search, Printer, Calendar, User, Phone, Trash2, Settings, MessageSquare
+} from 'lucide-react'; // Popravljen import ovde
 
+// --- INTERFACES ---
 interface Customer { id: string; ime: string; broj_telefona: string; }
 interface Device { id: string; brand: string; model: string; imei?: string | null; }
+
 interface Order {
   id: string;
   created_at: string;
@@ -17,43 +20,30 @@ interface Order {
   devices: Device;
 }
 
-type ModalMode = 'new' | 'recept' | 'edit' | 'templates' | '';
+type ModalMode = 'new' | 'edit' | 'templates' | '';
 
 export default function ServisDashboard() {
-  // --- state / hooks (declare all at top to keep hooks order stable) ---
+  // --- STATE ---
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState<ModalMode>('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [companyName, setCompanyName] = useState<string>('Mobilni Servis Šabac');
+
   const [newOrder, setNewOrder] = useState({
     ime: '', broj: '', brand: '', model: '', imei: '', opis: '', rok: ''
   });
-  const [searchTerm, setSearchTerm] = useState('');
 
-  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
-
-  // company name used in templates and printing
-  const [companyName, setCompanyName] = useState<string>('Mobilni Servis Šabac');
-
-  // templates (contain {{company}} placeholder; in JSX we always escape)
   const [templates, setTemplates] = useState<Record<string, string>>({
-    primljen: `📱 Primljeno na servis!
-Korisnik: {{ime}}
-Model: {{brand}} {{model}}
-IMEI: {{imei}}
-Problem: {{opis}}
-Rok: {{rok}}
-
-Hvala!
-{{company}}`,
-    neuspeh: `⚠️ Nažalost, popravka uređaja {{brand}} {{model}} (IMEI: {{imei}}) nije uspela. Kontaktiraćemo vas za dalji postupak.
-{{company}}`,
-    zavrsen: `✅ Popravka završena! {{brand}} {{model}} (IMEI: {{imei}}) spreman za preuzimanje.
-{{company}}`
+    primljen: `📱 Primljeno na servis!\nKorisnik: {{ime}}\nModel: {{brand}} {{model}}\nIMEI: {{imei}}\nProblem: {{opis}}\nRok: {{rok}}\n\nHvala!\n{{company}}`,
+    neuspeh: `⚠️ Nažalost, popravka uređaja {{brand}} {{model}} (IMEI: {{imei}}) nije uspela.\n{{company}}`,
+    zavrsen: `✅ Popravka završena! {{brand}} {{model}} (IMEI: {{imei}}) spreman za preuzimanje.\n{{company}}`
   });
 
-  const [previewCtx, setPreviewCtx] = useState({
+  const previewCtx = {
     ime: 'Petar Petrović',
     brand: 'Samsung',
     model: 'A52',
@@ -61,21 +51,12 @@ Hvala!
     rok: '01.02.2026',
     opis: 'Ne pali ekran',
     order_id: 'ABC12345'
-  });
+  };
 
-  // --- effects ---
-  useEffect(() => {
-    if (showModal === 'new') {
-      const today = new Date().toISOString().split('T')[0];
-      setNewOrder({ ime: '', broj: '', brand: '', model: '', imei: '', opis: '', rok: today });
-      setSelectedOrder(null);
-    }
-  }, [showModal]);
-
+  // --- EFFECTS ---
   useEffect(() => {
     fetchOrders();
     fetchTemplates();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -88,14 +69,7 @@ Hvala!
     setFilteredOrders(filtered);
   }, [searchTerm, orders]);
 
-  // keep a no-op effect to preserve hook order stability (safe)
-  useEffect(() => {
-    const handler = () => {};
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, []);
-
-  // --- helpers / API ---
+  // --- API FUNCTIONS ---
   const fetchOrders = async () => {
     setLoading(true);
     try {
@@ -108,37 +82,21 @@ Hvala!
         `)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('fetchOrders supabase error', error);
-        setOrders([]);
-        setFilteredOrders([]);
-        setLoading(false);
-        return;
-      }
+      if (error) throw error;
 
-      // Normalize Supabase result to our Order[] shape.
-      // Supabase may return relation fields as arrays; extract first element if so.
-      const raw = (data || []) as any[];
-      const mapped: Order[] = raw.map((row: any) => {
-        const customerRaw = row.customers;
-        const deviceRaw = row.devices;
-
-        const customer: Customer = Array.isArray(customerRaw)
-          ? (customerRaw[0] ?? { id: '', ime: '', broj_telefona: '' })
-          : (customerRaw ?? { id: '', ime: '', broj_telefona: '' });
-
-        const device: Device = Array.isArray(deviceRaw)
-          ? (deviceRaw[0] ?? { id: '', brand: '', model: '', imei: null })
-          : (deviceRaw ?? { id: '', brand: '', model: '', imei: null });
+      const rawData = (data || []) as any[];
+      const mapped: Order[] = rawData.map((row) => {
+        const custRaw = Array.isArray(row.customers) ? row.customers[0] : row.customers;
+        const devRaw = Array.isArray(row.devices) ? row.devices[0] : row.devices;
 
         return {
           id: row.id,
           created_at: row.created_at,
           status: row.status,
           opis_problema: row.opis_problema,
-          rok_zavrsetka: row.rok_zavrsetka ?? null,
-          customers: customer,
-          devices: device
+          rok_zavrsetka: row.rok_zavrsetka,
+          customers: custRaw || { id: '', ime: 'Nepoznato', broj_telefona: '' },
+          devices: devRaw || { id: '', brand: '', model: '', imei: '' }
         };
       });
 
@@ -146,8 +104,6 @@ Hvala!
       setFilteredOrders(mapped);
     } catch (err) {
       console.error('fetchOrders error', err);
-      setOrders([]);
-      setFilteredOrders([]);
     } finally {
       setLoading(false);
     }
@@ -155,723 +111,295 @@ Hvala!
 
   const fetchTemplates = async () => {
     try {
-      const { data, error } = await supabase
-        .from('wa_templates')
-        .select('status, message');
-
-      if (error) {
-        // table may not exist — keep defaults
-        console.warn('Templates fetch error (ok to ignore if table missing):', (error as any).message ?? error);
-        return;
-      }
-
+      const { data, error } = await supabase.from('wa_templates').select('status, message');
+      if (error) return;
       if (data && data.length) {
         const map: Record<string, string> = {};
         data.forEach((t: any) => {
-          if (t.status === 'company') {
-            if (t.message) setCompanyName(t.message);
-          } else {
-            map[t.status] = t.message;
-          }
+          if (t.status === 'company') setCompanyName(t.message);
+          else map[t.status] = t.message;
         });
         setTemplates(prev => ({ ...prev, ...map }));
-      } else {
-        await ensureDefaultTemplatesInDB();
       }
-    } catch (err) {
-      console.error('fetchTemplates error', err);
-    }
+    } catch (err) { console.warn('Templates fetch error:', err); }
   };
 
-  const ensureDefaultTemplatesInDB = async () => {
+  const saveTemplates = async () => {
     try {
-      const payload = Object.entries({ ...templates, company: companyName }).map(([status, message]) => ({ status, message }));
-      // onConflict expects a string in these types
+      const payload = [
+        ...Object.entries(templates).map(([status, message]) => ({ status, message })),
+        { status: 'company', message: companyName }
+      ];
       await supabase.from('wa_templates').upsert(payload, { onConflict: 'status' });
-    } catch (err) {
-      console.warn('Could not create default templates in DB:', err);
-    }
+      setShowModal('');
+      alert('✅ Podešavanja sačuvana!');
+    } catch (err) { alert('Greška pri čuvanju.'); }
   };
 
-  const replacePlaceholders = (template: string, ctx: { ime?: string; brand?: string; model?: string; imei?: string | null; rok?: string; opis?: string; status?: string; order_id?: string }) => {
+  const replacePlaceholders = (template: string, ctx: any) => {
+    if (!template) return '';
     return template
       .replace(/{{\s*ime\s*}}/gi, ctx.ime || '')
       .replace(/{{\s*brand\s*}}/gi, ctx.brand || '')
       .replace(/{{\s*model\s*}}/gi, ctx.model || '')
-      .replace(/{{\s*imei\s*}}/gi, ctx.imei ?? 'N/A')
+      .replace(/{{\s*imei\s*}}/gi, ctx.imei || 'N/A')
       .replace(/{{\s*rok\s*}}/gi, ctx.rok || '')
       .replace(/{{\s*opis\s*}}/gi, ctx.opis || '')
-      .replace(/{{\s*status\s*}}/gi, ctx.status || '')
       .replace(/{{\s*order_id\s*}}/gi, ctx.order_id || '')
-      .replace(/{{\s*company\s*}}/gi, companyName || '');
+      .replace(/{{\s*company\s*}}/gi, companyName);
   };
 
-  const sendWhatsApp = async (broj: string, poruka: string) => {
-    try {
-      await fetch('/api/wa/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ broj, poruka })
-      });
-    } catch (error) {
-      console.error('WhatsApp error:', error);
-    }
-  };
+const sendWhatsApp = async (broj: string, poruka: string) => {
+  try {
+    // Provera pre slanja
+    if (!broj || !poruka) return;
 
-  // --- REPLACED changeStatus: optimistic update + WA send + error handling ---
+    await fetch('/api/wa/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        broj: broj, // Mora biti string (npr. "38165...")
+        poruka: poruka 
+      })
+    });
+  } catch (error) {
+    console.error('Greška pri slanju:', error);
+  }
+};
+
   const changeStatus = async (orderId: string, newStatus: string) => {
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
 
-    const tpl = templates[newStatus];
-    const porukaFromTpl = tpl ? replacePlaceholders(tpl, {
-      ime: order.customers.ime,
-      brand: order.devices.brand,
-      model: order.devices.model,
-      imei: order.devices.imei || 'N/A',
-      rok: order.rok_zavrsetka ? new Date(order.rok_zavrsetka).toLocaleDateString('sr-RS') : 'uskoro',
-      status: newStatus,
-      order_id: order.id.slice(-8)
-    }) : '';
-
-    let poruka = porukaFromTpl;
-    if (!poruka) {
-      if (newStatus === 'neuspeh') {
-        poruka = `⚠️ Nažalost, popravka uređaja ${order.devices.brand} ${order.devices.model} (IMEI: ${order.devices.imei || 'N/A'}) nije uspela. Kontaktiraćemo vas.\n${companyName}`;
-      } else if (newStatus === 'zavrsen') {
-        poruka = `✅ Popravka završena! ${order.devices.brand} ${order.devices.model} (IMEI: ${order.devices.imei || 'N/A'}) spreman za preuzimanje.\n${companyName}`;
-      }
-    }
-
-    // Save snapshots to allow revert
-    const prevOrders = orders;
-    const prevFiltered = filteredOrders;
-    const prevSelected = selectedOrder;
-
-    // Optimistic UI update
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
-    setFilteredOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
-    if (selectedOrder?.id === orderId) {
-      setSelectedOrder({ ...selectedOrder, status: newStatus });
-    }
-
     try {
-      const res = await supabase
-        .from('orders')
-        .update({ status: newStatus })
-        .eq('id', orderId)
-        .select();
+      const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
+      if (error) throw error;
 
-      // Normalize response
-      const anyRes: any = res as any;
-      if (anyRes.error) {
-        // revert UI
-        setOrders(prevOrders);
-        setFilteredOrders(prevFiltered);
-        if (prevSelected) setSelectedOrder(prevSelected);
-        console.error('Supabase returned error:', anyRes.error);
-        throw anyRes.error;
-      }
+      const poruka = replacePlaceholders(templates[newStatus] || '', {
+        ime: order.customers.ime,
+        brand: order.devices.brand,
+        model: order.devices.model,
+        imei: order.devices.imei,
+        rok: order.rok_zavrsetka ? new Date(order.rok_zavrsetka).toLocaleDateString('sr-RS') : 'uskoro',
+        order_id: order.id.slice(-8)
+      });
 
-      // send WA (if message)
-      if (poruka) {
-        try {
-          await sendWhatsApp(order.customers.broj_telefona, poruka);
-        } catch (waErr) {
-          console.warn('WhatsApp send failed:', waErr);
-          alert('Status je promenjen, ali slanje WhatsApp poruke nije uspelo. Proveri konzolu.');
-        }
-      }
-
-      // Sync to be safe
-      await fetchOrders();
-    } catch (err: any) {
-      // Revert UI
-      setOrders(prevOrders);
-      setFilteredOrders(prevFiltered);
-      if (prevSelected) setSelectedOrder(prevSelected);
-
-      console.error('changeStatus error detailed:', err);
-      const errMsg = err?.message || err?.msg || JSON.stringify(err) || String(err);
-      alert(`Greška pri promeni statusa: ${errMsg}. Pogledaj konzolu (network/console) za detalje.`);
+      if (poruka) await sendWhatsApp(order.customers.broj_telefona, poruka);
       fetchOrders();
+    } catch (err) { 
+      alert('Greška pri promeni statusa'); 
     }
   };
 
   const createOrUpdateOrder = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-
-    if (!newOrder.ime.trim() || !newOrder.broj.trim() || !newOrder.brand.trim() ||
-      !newOrder.model.trim() || !newOrder.opis.trim()) {
-      alert('❌ Popunite sva obavezna polja (*)');
-      return;
-    }
+    if (!newOrder.ime || !newOrder.broj) return alert('Ime i broj su obavezni!');
 
     try {
-      // Find or create customer
-      let customer;
-      const { data: existingCustomer, error: fetchError } = await supabase
-        .from('customers')
-        .select('id, ime, broj_telefona')
-        .eq('broj_telefona', newOrder.broj.trim())
-        .single();
-
-      if (fetchError && (fetchError as any).code !== 'PGRST116') {
-        throw new Error(`Greška pri proveri korisnika: ${(fetchError as any).message || fetchError}`);
-      }
-
-      if (existingCustomer) {
-        if (selectedOrder && existingCustomer.id === selectedOrder.customers.id && existingCustomer.ime !== newOrder.ime.trim()) {
-          await supabase.from('customers').update({ ime: newOrder.ime.trim() }).eq('id', existingCustomer.id);
-        }
-        customer = existingCustomer;
+      let customerId;
+      const { data: existing } = await supabase.from('customers').select('id').eq('broj_telefona', newOrder.broj.trim()).single();
+      
+      if (existing) {
+        customerId = existing.id;
+        await supabase.from('customers').update({ ime: newOrder.ime }).eq('id', customerId);
       } else {
-        const { data: newCustomer, error: insertError } = await supabase
-          .from('customers')
-          .insert({
-            ime: newOrder.ime.trim(),
-            broj_telefona: newOrder.broj.trim()
-          })
-          .select('id, ime, broj_telefona')
-          .single();
-
-        if (insertError || !newCustomer) {
-          throw new Error(`Greška pri kreiranju korisnika: ${(insertError as any)?.message || insertError}`);
-        }
-        customer = newCustomer;
+        const { data: newC, error: cErr } = await supabase.from('customers').insert({ ime: newOrder.ime, broj_telefona: newOrder.broj }).select().single();
+        if (cErr) throw cErr;
+        customerId = newC.id;
       }
 
       if (selectedOrder) {
-        // EDIT FLOW
-        await supabase.from('devices').update({
-          brand: newOrder.brand.trim(),
-          model: newOrder.model.trim(),
-          imei: newOrder.imei.trim() || null
-        }).eq('id', selectedOrder.devices.id);
-
-        await supabase.from('orders').update({
-          customer_id: customer.id,
-          opis_problema: newOrder.opis.trim(),
-          rok_zavrsetka: newOrder.rok || null
-        }).eq('id', selectedOrder.id);
-
-        setShowModal('');
-        setSelectedOrder(null);
-        setNewOrder({ ime: '', broj: '', brand: '', model: '', imei: '', opis: '', rok: '' });
-        fetchOrders();
-        alert('✅ Nalog uspešno izmenjen!');
+        await supabase.from('devices').update({ brand: newOrder.brand, model: newOrder.model, imei: newOrder.imei }).eq('id', selectedOrder.devices.id);
+        await supabase.from('orders').update({ customer_id: customerId, opis_problema: newOrder.opis, rok_zavrsetka: newOrder.rok || null }).eq('id', selectedOrder.id);
       } else {
-        // CREATE FLOW
-        const { data: device, error: deviceError } = await supabase
-          .from('devices')
-          .insert({
-            customer_id: customer.id,
-            brand: newOrder.brand.trim(),
-            model: newOrder.model.trim(),
-            imei: newOrder.imei.trim() || null
-          })
-          .select()
-          .single();
-
-        if (deviceError || !device) {
-          throw new Error(`Greška pri kreiranju uređaja: ${(deviceError as any)?.message || deviceError}`);
-        }
-
-        const { error: orderError } = await supabase
-          .from('orders')
-          .insert({
-            customer_id: customer.id,
-            device_id: device.id,
-            opis_problema: newOrder.opis.trim(),
-            rok_zavrsetka: newOrder.rok || null,
-            status: 'primljen'
-          });
-
-        if (orderError) {
-          throw new Error(`Greška pri kreiranju naloga: ${(orderError as any).message || orderError}`);
-        }
-
-        // WhatsApp using template (primljen)
-        const tpl = templates['primljen'];
-        const poruka = tpl ? replacePlaceholders(tpl, {
-          ime: newOrder.ime.trim(),
-          brand: newOrder.brand.trim(),
-          model: newOrder.model.trim(),
-          imei: newOrder.imei.trim() || 'N/A',
-          opis: newOrder.opis.trim(),
-          rok: newOrder.rok ? new Date(newOrder.rok).toLocaleDateString('sr-RS') : 'uskoro',
-          status: 'primljen',
-          order_id: ''
-        }) : `📱 Primljeno na servis!\nKorisnik: ${newOrder.ime.trim()}\nModel: ${newOrder.brand.trim()} ${newOrder.model.trim()}\nIMEI: ${newOrder.imei.trim() || 'N/A'}\nProblem: ${newOrder.opis.trim()}\nRok: ${newOrder.rok ? new Date(newOrder.rok).toLocaleDateString('sr-RS') : 'uskoro'}\n\nHvala!\n${companyName}`;
-
-        await sendWhatsApp(newOrder.broj, poruka);
-
-        setShowModal('');
-        setNewOrder({ ime: '', broj: '', brand: '', model: '', imei: '', opis: '', rok: '' });
-        fetchOrders();
-        alert('✅ Nalog uspešno kreiran!');
+        const { data: dev, error: dErr } = await supabase.from('devices').insert({ customer_id: customerId, brand: newOrder.brand, model: newOrder.model, imei: newOrder.imei }).select().single();
+        if (dErr) throw dErr;
+        await supabase.from('orders').insert({ customer_id: customerId, device_id: dev.id, opis_problema: newOrder.opis, rok_zavrsetka: newOrder.rok || null, status: 'primljen' });
+        
+        const msg = replacePlaceholders(templates.primljen, { ...newOrder, company: companyName });
+        await sendWhatsApp(newOrder.broj, msg);
       }
-    } catch (error: any) {
-      console.error('createOrUpdateOrder error:', error);
-      alert(`❌ Greška: ${error?.message || error}`);
-    }
-  };
 
-  const deleteOrder = async (orderId: string) => {
-    if (!confirm('Da li ste sigurni da želite da obrišete ovaj nalog? Ova akcija se ne može poništiti.')) return;
-    try {
-      const { error } = await supabase.from('orders').delete().eq('id', orderId);
-      if (error) throw error;
-      fetchOrders();
-      alert('✅ Nalog obrisan.');
-    } catch (err: any) {
-      console.error('deleteOrder error', err);
-      alert(`❌ Greška pri brisanju: ${err.message || err}`);
-    }
-  };
-
-  const saveTemplates = async (newTemplates: Record<string, string>) => {
-    try {
-      setTemplates(newTemplates);
-      const payload = Object.entries({ ...newTemplates, company: companyName }).map(([status, message]) => ({ status, message }));
-      await supabase.from('wa_templates').upsert(payload, { onConflict: 'status' });
       setShowModal('');
-      alert('✅ Poruke i naziv firme sačuvani.');
-    } catch (err) {
-      console.error('saveTemplates error', err);
-      alert('❌ Greška pri čuvanju poruka.');
-    }
+      fetchOrders();
+    } catch (err) { alert('Greška pri čuvanju.'); }
   };
 
-  const openEditModal = (order: Order) => {
-    setSelectedOrder(order);
-    setNewOrder({
-      ime: order.customers.ime,
-      broj: order.customers.broj_telefona,
-      brand: order.devices.brand,
-      model: order.devices.model,
-      imei: order.devices.imei || '',
-      opis: order.opis_problema,
-      rok: order.rok_zavrsetka ? order.rok_zavrsetka.split('T')[0] : ''
-    });
-    setShowModal('edit');
+  const deleteOrder = async (id: string) => {
+    if (confirm('Trajno obrisati?')) {
+      await supabase.from('orders').delete().eq('id', id);
+      fetchOrders();
+    }
   };
 
   const printRecept = (order: Order) => {
-    const recept = `
-${companyName}
-===================
-Korisnik: ${order.customers.ime}
-Telefon: ${order.devices.brand} ${order.devices.model}
-IMEI: ${order.devices.imei || 'N/A'}
-Problem: ${order.opis_problema}
-Status: ${order.status.toUpperCase()}
-Datum: ${new Date().toLocaleDateString('sr-RS')}
-Broj naloga: #${order.id.slice(-8)}
-===================
-Hvala na povjerenju!
-${companyName}
-`;
-    const printWindow = window.open('', '_blank');
-    printWindow?.document.write(`
-      <html><head><title>Recept #${order.id.slice(-8)}</title>
-      <style>body{font-family:Arial;font-size:14px;line-height:1.4;}</style></head>
-      <body onload="window.print();window.close();">${recept.replace(/\n/g, '<br>')}</body></html>
-    `);
+    const content = `
+      ${companyName}\n===================\n
+      Korisnik: ${order.customers.ime}\n
+      Uređaj: ${order.devices.brand} ${order.devices.model}\n
+      IMEI: ${order.devices.imei || 'N/A'}\n
+      Problem: ${order.opis_problema}\n
+      Status: ${order.status.toUpperCase()}\n
+      Datum: ${new Date().toLocaleDateString('sr-RS')}\n
+      Br. naloga: #${order.id.slice(-8).toUpperCase()}\n
+      ===================\nHvala na poverenju!
+    `;
+    const win = window.open('', '_blank');
+    win?.document.write(`<html><body onload="window.print();window.close()"><pre style="font-family:monospace;font-size:12px">${content}</pre></body></html>`);
   };
 
   const stats = {
     ukupno: orders.length,
     primljeno: orders.filter(o => o.status === 'primljen').length,
-    neuspeh: orders.filter(o => o.status === 'neuspeh').length,
     zavrseno: orders.filter(o => o.status === 'zavrsen').length,
+    neuspeh: orders.filter(o => o.status === 'neuspeh').length,
   };
 
-  // helper to truncate long texts
-  const truncate = (text: string, len = 90) => text.length > len ? text.slice(0, len).trim() + '…' : text;
-
-  const previewFor = (statusKey: string) => replacePlaceholders(templates[statusKey] || '', previewCtx);
-
-  // ---------- UI ----------
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-blue-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p>Učitavanje naloga...</p>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="flex items-center justify-center min-h-screen">Učitavanje...</div>;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-blue-50 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-5xl mx-auto">
-
-        {/* Statistika */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl shadow">
-            <p className="text-sm opacity-90">Ukupno</p>
-            <p className="text-2xl font-bold">{stats.ukupno}</p>
+    <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans text-slate-900">
+      <div className="max-w-6xl mx-auto">
+        
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+          <div>
+            <h1 className="text-3xl font-black tracking-tight text-indigo-950 uppercase">{companyName}</h1>
+            <p className="text-slate-500 font-medium">Servisni Panel v2.0</p>
           </div>
-          <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 text-white p-4 rounded-xl shadow">
-            <p className="text-sm opacity-90">Primljeno</p>
-            <p className="text-2xl font-bold">{stats.primljeno}</p>
-          </div>
-          <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-4 rounded-xl shadow">
-            <p className="text-sm opacity-90">Neuspeh</p>
-            <p className="text-2xl font-bold">{stats.neuspeh}</p>
-          </div>
-          <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl shadow">
-            <p className="text-sm opacity-90">Završeno</p>
-            <p className="text-2xl font-bold">{stats.zavrseno}</p>
-          </div>
-        </div>
-
-        {/* Search + actions */}
-        <div className="flex flex-col sm:flex-row items-center gap-4 mb-6">
-          <div className="relative flex-1 max-w-md w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="Pretraga po imenu, marki, modelu ili IMEI..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white/60"
-            />
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowModal('templates')}
-              title="Uredi poruke i naziv firme"
-              className="hidden sm:inline-flex items-center justify-center w-10 h-10 bg-gray-700 text-white rounded-lg"
-            >
-              ✉️
+          <div className="flex gap-3">
+            <button onClick={() => setShowModal('templates')} className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-600 hover:bg-slate-50 transition shadow-sm">
+              <Settings size={20} />
             </button>
-
-            <button
-              onClick={() => setShowModal('new')}
-              className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-3 py-2 rounded-lg font-medium"
-            >
-              <Plus size={16} />
-              Novi
+            <button onClick={() => { setSelectedOrder(null); setNewOrder({ ime: '', broj: '', brand: '', model: '', imei: '', opis: '', rok: '' }); setShowModal('new'); }} 
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl flex items-center gap-2 shadow-lg shadow-indigo-200 transition-all active:scale-95 font-bold">
+              <Plus size={22} /> NOVI NALOG
             </button>
           </div>
-        </div>
+        </header>
 
-        {/* Orders */}
-        <div className="space-y-3">
-          {filteredOrders.length === 0 ? (
-            <div className="text-center py-16 text-gray-500 rounded-lg border border-dashed border-gray-200">
-              <Calendar size={56} className="mx-auto mb-4 opacity-40" />
-              <h3 className="text-lg font-semibold mb-1">Nema naloga</h3>
-              <p className="text-sm">Kliknite "Novi" da dodate nalog</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          {[
+            { label: 'Ukupno', val: stats.ukupno, bg: 'bg-white', txt: 'text-slate-800' },
+            { label: 'Na servisu', val: stats.primljeno, bg: 'bg-amber-500', txt: 'text-white' },
+            { label: 'Završeno', val: stats.zavrseno, bg: 'bg-emerald-500', txt: 'text-white' },
+            { label: 'Neuspeh', val: stats.neuspeh, bg: 'bg-rose-500', txt: 'text-white' }
+          ].map((s, i) => (
+            <div key={i} className={`${s.bg} p-6 rounded-3xl shadow-sm border border-slate-100 transition-transform hover:scale-[1.02]`}>
+              <p className={`text-[10px] font-black uppercase tracking-[0.2em] mb-1 ${s.txt === 'text-white' ? 'opacity-80' : 'text-slate-400'}`}>{s.label}</p>
+              <p className={`text-3xl font-black ${s.txt}`}>{s.val}</p>
             </div>
-          ) : (
-            filteredOrders.map((order) => {
-              const expanded = expandedOrderId === order.id;
-              return (
-                <div key={order.id} className={`bg-white rounded-xl shadow-sm border overflow-visible ${expanded ? 'ring-2 ring-indigo-100' : ''}`}>
-                  <button
-                    onClick={() => setExpandedOrderId(expanded ? null : order.id)}
-                    className="w-full text-left p-4 flex items-center justify-between gap-4"
-                  >
-                    <div className="min-w-0 flex-1 flex items-center gap-3">
-                      <div className="p-2 bg-gray-100 rounded-md flex items-center justify-center">
-                        <User size={18} className="text-gray-700"/>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div className="font-semibold text-lg truncate">{order.customers.ime}</div>
-                          <div className={`text-xs font-bold px-3 py-1 rounded-full ${
-                            order.status === 'primljen' ? 'bg-yellow-100 text-yellow-800' :
-                            order.status === 'neuspeh' ? 'bg-red-100 text-red-800' :
-                            order.status === 'zavrsen' ? 'bg-green-100 text-green-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}>
-                            {order.status === 'primljen' ? 'Čekanje' :
-                              order.status === 'neuspeh' ? 'Neuspeh' :
-                              order.status === 'zavrsen' ? 'Završeno' :
-                              order.status.toUpperCase()}
-                          </div>
-                        </div>
+          ))}
+        </div>
 
-                        <div className="mt-1 text-sm text-gray-600 flex items-center gap-2">
-                          <Phone size={14} className="text-gray-400" />
-                          <div className="truncate">{order.customers.broj_telefona}</div>
-                        </div>
+        <div className="relative mb-8 group">
+          <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={22} />
+          <input 
+            type="text" 
+            placeholder="Pretraga klijenata, modela ili IMEI brojeva..." 
+            className="w-full pl-14 pr-6 py-5 bg-white rounded-3xl border-none shadow-sm focus:ring-4 focus:ring-indigo-100 outline-none transition-all text-lg"
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
 
-                        <div className="mt-2 text-sm text-gray-600">
-                          <div className="font-medium truncate">{order.devices.brand} {order.devices.model}
-                            {order.devices.imei ? <span className="text-gray-500"> • IMEI: {order.devices.imei}</span> : null}
-                          </div>
-                          <div className="text-xs text-gray-500 mt-1 truncate">{truncate(order.opis_problema, 110)}</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <div className="text-xs text-gray-400 hidden sm:block">{new Date(order.created_at).toLocaleDateString('sr-RS')}</div>
-                      <div className="text-sm text-indigo-600 font-semibold">{expanded ? 'Sakrij' : 'Detalji'}</div>
-                    </div>
-                  </button>
-
-                  {expanded && (
-                    <div className="p-4 border-t bg-gray-50">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="md:col-span-2">
-                          <div className="text-sm text-gray-700 mb-2"><strong>Opis problema:</strong></div>
-                          <div className="text-sm text-gray-800 whitespace-pre-wrap mb-3">{order.opis_problema}</div>
-
-                          <div className="flex flex-wrap gap-3 text-sm text-gray-600">
-                            <div className="flex items-center gap-2"><strong>Telefon:</strong> <span className="text-gray-800">{order.devices.brand} {order.devices.model}</span></div>
-                            {order.devices.imei && <div className="flex items-center gap-2"><strong>IMEI:</strong> <span className="text-gray-800">{order.devices.imei}</span></div>}
-                            {order.rok_zavrsetka && <div className="flex items-center gap-2"><strong>Rok:</strong> <span className="text-gray-800">{new Date(order.rok_zavrsetka).toLocaleDateString('sr-RS')}</span></div>}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-end gap-3">
-                          <div className="flex items-center gap-2">
-                            <button
-                              title="Označi kao završeno"
-                              onClick={() => changeStatus(order.id, 'zavrsen')}
-                              className="w-9 h-9 flex items-center justify-center rounded-md bg-green-50 text-green-700 hover:bg-green-100"
-                            >
-                              <Send size={16} />
-                            </button>
-
-                            <button
-                              title="Označi kao neuspeh"
-                              onClick={() => changeStatus(order.id, 'neuspeh')}
-                              className="w-9 h-9 flex items-center justify-center rounded-md bg-red-50 text-red-700 hover:bg-red-100"
-                            >
-                              <X size={16} />
-                            </button>
-
-                            <button
-                              title="Izmeni nalog"
-                              onClick={() => openEditModal(order)}
-                              className="w-9 h-9 flex items-center justify-center rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                            >
-                              <Edit3 size={16} />
-                            </button>
-
-                            <button
-                              title="Obriši nalog"
-                              onClick={() => deleteOrder(order.id)}
-                              className="w-9 h-9 flex items-center justify-center rounded-md bg-red-50 text-red-700 hover:bg-red-100"
-                            >
-                              <X size={16} />
-                            </button>
-
-                            <button
-                              title="Recept"
-                              onClick={() => printRecept(order)}
-                              className="w-9 h-9 flex items-center justify-center rounded-md bg-gray-800 text-white hover:brightness-90"
-                            >
-                              <Printer size={14} />
-                            </button>
-                          </div>
-
-                          <div className="text-xs text-gray-500">Broj: #{order.id.slice(-8).toUpperCase()}</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+        <div className="space-y-4">
+          {filteredOrders.map(order => (
+            <div key={order.id} className={`bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden transition-all ${expandedOrderId === order.id ? 'ring-2 ring-indigo-500' : ''}`}>
+              <div className="p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="flex-1 cursor-pointer w-full" onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <h3 className="text-xl font-bold text-slate-800">{order.customers.ime}</h3>
+                    <span className={`px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                      order.status === 'zavrsen' ? 'bg-emerald-100 text-emerald-700' : 
+                      order.status === 'neuspeh' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {order.status}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm font-medium text-slate-500">
+                    <span className="flex items-center gap-2"><Phone size={16} className="text-indigo-400"/> {order.customers.broj_telefona}</span>
+                    <span className="flex items-center gap-2 text-slate-800 underline decoration-indigo-200 decoration-2 underline-offset-4">{order.devices.brand} {order.devices.model}</span>
+                  </div>
                 </div>
-              );
-            })
-          )}
+                
+                <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl">
+                  <button onClick={() => changeStatus(order.id, 'zavrsen')} className="p-3 bg-white text-emerald-600 rounded-xl hover:shadow-md transition active:scale-90" title="Završi"><Send size={20}/></button>
+                  <button onClick={() => changeStatus(order.id, 'neuspeh')} className="p-3 bg-white text-rose-600 rounded-xl hover:shadow-md transition active:scale-90" title="Neuspeh"><X size={20}/></button>
+                  <button onClick={() => { setSelectedOrder(order); setNewOrder({ ime: order.customers.ime, broj: order.customers.broj_telefona, brand: order.devices.brand, model: order.devices.model, imei: order.devices.imei || '', opis: order.opis_problema, rok: order.rok_zavrsetka?.split('T')[0] || '' }); setShowModal('edit'); }} className="p-3 bg-white text-indigo-600 rounded-xl hover:shadow-md transition active:scale-90"><Edit3 size={20}/></button>
+                  <button onClick={() => printRecept(order)} className="p-3 bg-white text-slate-600 rounded-xl hover:shadow-md transition active:scale-90"><Printer size={20}/></button>
+                  <button onClick={() => deleteOrder(order.id)} className="p-3 bg-white text-slate-400 hover:text-rose-600 rounded-xl transition active:scale-90"><Trash2 size={20}/></button>
+                </div>
+              </div>
+
+              {expandedOrderId === order.id && (
+                <div className="px-8 pb-8 pt-4 bg-indigo-50/30 border-t border-indigo-50">
+                  <div className="grid md:grid-cols-2 gap-8">
+                    <div className="bg-white p-6 rounded-2xl shadow-sm">
+                      <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3">Opis Kvara</p>
+                      <p className="text-slate-700 leading-relaxed font-medium">{order.opis_problema}</p>
+                    </div>
+                    <div className="space-y-4 text-sm">
+                      <p className="flex justify-between border-b pb-2"><span className="text-slate-400">IMEI:</span> <b>{order.devices.imei || 'Nema'}</b></p>
+                      <p className="flex justify-between border-b pb-2"><span className="text-slate-400">Rok:</span> <b>{order.rok_zavrsetka ? new Date(order.rok_zavrsetka).toLocaleDateString('sr-RS') : 'Nema'}</b></p>
+                      <p className="flex justify-between border-b pb-2"><span className="text-slate-400">Prijem:</span> <b>{new Date(order.created_at).toLocaleDateString('sr-RS')}</b></p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* MODALS (new/edit, recept, templates) */}
+      {/* NEW/EDIT MODAL */}
       {(showModal === 'new' || showModal === 'edit') && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50" onClick={() => setShowModal('')}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
-            <div className={`p-6 ${showModal === 'new' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white' : 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white'}`}>
-              <h3 className="text-2xl font-bold">{showModal === 'new' ? 'Novi nalog na servis' : 'Izmeni nalog'}</h3>
+        <div className="fixed inset-0 bg-indigo-950/40 backdrop-blur-md flex items-center justify-center p-4 z-50 text-sm">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-2xl overflow-hidden shadow-2xl">
+            <div className="p-8 border-b flex justify-between items-center bg-slate-50/50">
+              <h2 className="text-2xl font-black text-indigo-950">{showModal === 'new' ? 'Novi Servisni Nalog' : 'Izmena Naloga'}</h2>
+              <button onClick={() => setShowModal('')} className="p-3 hover:bg-white rounded-2xl transition shadow-sm"><X/></button>
             </div>
-            <form onSubmit={createOrUpdateOrder} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input
-                  type="text"
-                  placeholder="Ime i prezime *"
-                  value={newOrder.ime}
-                  onChange={(e) => setNewOrder({ ...newOrder, ime: e.target.value })}
-                  className="p-3 border border-gray-200 rounded-lg w-full"
-                  required
-                />
-                <input
-                  type="tel"
-                  placeholder="Broj telefona (381...)*"
-                  value={newOrder.broj}
-                  onChange={(e) => setNewOrder({ ...newOrder, broj: e.target.value })}
-                  className="p-3 border border-gray-200 rounded-lg w-full"
-                  required
-                />
+            <form onSubmit={createOrUpdateOrder} className="p-8 space-y-5">
+              <div className="grid grid-cols-2 gap-5">
+                <input value={newOrder.ime} placeholder="Ime klijenta" className="w-full p-4 bg-slate-100 rounded-2xl outline-none" required onChange={e => setNewOrder({...newOrder, ime: e.target.value})} />
+                <input value={newOrder.broj} placeholder="3816..." className="w-full p-4 bg-slate-100 rounded-2xl outline-none" required onChange={e => setNewOrder({...newOrder, broj: e.target.value})} />
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input
-                  type="text"
-                  placeholder="Marka (Samsung, iPhone...)*"
-                  value={newOrder.brand}
-                  onChange={(e) => setNewOrder({ ...newOrder, brand: e.target.value })}
-                  className="p-3 border border-gray-200 rounded-lg w-full"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="Model *"
-                  value={newOrder.model}
-                  onChange={(e) => setNewOrder({ ...newOrder, model: e.target.value })}
-                  className="p-3 border border-gray-200 rounded-lg w-full"
-                  required
-                />
+              <div className="grid grid-cols-2 gap-5">
+                <input value={newOrder.brand} placeholder="Marka" className="w-full p-4 bg-slate-100 rounded-2xl outline-none" required onChange={e => setNewOrder({...newOrder, brand: e.target.value})} />
+                <input value={newOrder.model} placeholder="Model" className="w-full p-4 bg-slate-100 rounded-2xl outline-none" required onChange={e => setNewOrder({...newOrder, model: e.target.value})} />
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input
-                  type="text"
-                  placeholder="IMEI (15 cifara)"
-                  value={newOrder.imei}
-                  onChange={(e) => setNewOrder({ ...newOrder, imei: e.target.value })}
-                  className="p-3 border border-gray-200 rounded-lg w-full"
-                  maxLength={15}
-                />
-                <input
-                  type="date"
-                  value={newOrder.rok}
-                  onChange={(e) => setNewOrder({ ...newOrder, rok: e.target.value })}
-                  className="p-3 border border-gray-200 rounded-lg w-full"
-                />
+              <textarea value={newOrder.opis} placeholder="Opis problema" className="w-full p-4 bg-slate-100 rounded-2xl outline-none h-32 resize-none" required onChange={e => setNewOrder({...newOrder, opis: e.target.value})} />
+              <div className="grid grid-cols-2 gap-5">
+                <input value={newOrder.imei} placeholder="IMEI" className="w-full p-4 bg-slate-100 rounded-2xl outline-none" onChange={e => setNewOrder({...newOrder, imei: e.target.value})} />
+                <input type="date" value={newOrder.rok} className="w-full p-4 bg-slate-100 rounded-2xl outline-none" onChange={e => setNewOrder({...newOrder, rok: e.target.value})} />
               </div>
-
-              <textarea
-                placeholder="Opis problema *"
-                value={newOrder.opis}
-                onChange={(e) => setNewOrder({ ...newOrder, opis: e.target.value })}
-                rows={4}
-                className="w-full p-3 border border-gray-200 rounded-lg"
-                required
-              />
-
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white py-3 rounded-lg font-medium"
-                >
-                  {showModal === 'new' ? 'Kreiraj + WhatsApp' : 'Sačuvaj izmene'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowModal(''); setSelectedOrder(null); }}
-                  className="px-4 py-3 border rounded-lg"
-                >
-                  Otkaži
-                </button>
-              </div>
+              <button type="submit" className="w-full bg-indigo-600 text-white py-5 rounded-[1.5rem] font-black text-lg hover:bg-indigo-700 transition shadow-xl mt-4 uppercase">
+                {showModal === 'new' ? 'Zavedi Nalog' : 'Sačuvaj Izmene'}
+              </button>
             </form>
           </div>
         </div>
       )}
 
-      {showModal === 'recept' && selectedOrder && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50" onClick={() => setShowModal('')}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
-            <div className="text-center mb-4">
-              <h3 className="text-2xl font-bold text-gray-900 mb-1">Recept / Potvrda</h3>
-              <div className="inline-block px-4 py-1 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-full font-semibold text-sm">
-                #{selectedOrder.id.slice(-8).toUpperCase()}
-              </div>
-            </div>
-            <div className="space-y-3 text-sm">
-              <div><strong>Korisnik:</strong> {selectedOrder.customers.ime}</div>
-              <div><strong>Telefon:</strong> {selectedOrder.devices.brand} {selectedOrder.devices.model}</div>
-              {selectedOrder.devices.imei && <div><strong>IMEI:</strong> {selectedOrder.devices.imei}</div>}
-              <div><strong>Problem:</strong> {selectedOrder.opis_problema}</div>
-              <div><strong>Status:</strong> <span className={`px-2 py-1 rounded-full font-bold ${
-                selectedOrder.status === 'zavrsen' ? 'bg-green-100 text-green-800' : selectedOrder.status === 'neuspeh' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
-              }`}>{selectedOrder.status.toUpperCase()}</span></div>
-              <div className="text-xs text-gray-500 mt-4 border-t pt-3">
-                Datum izdavanja: {new Date().toLocaleString('sr-RS')} | {companyName}
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => printRecept(selectedOrder)}
-                className="flex-1 bg-gradient-to-r from-gray-800 to-gray-900 text-white py-2 rounded-lg"
-              >
-                Ispiši
-              </button>
-              <button
-                onClick={() => setShowModal('')}
-                className="flex-1 border rounded-lg py-2"
-              >
-                Zatvori
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* TEMPLATES MODAL */}
       {showModal === 'templates' && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50" onClick={() => setShowModal('')}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="bg-gradient-to-r from-gray-700 to-gray-900 text-white p-4 rounded-t-3xl">
-              <h3 className="text-lg font-bold">Uredi WhatsApp poruke + Preview</h3>
-              <p className="text-xs opacity-80 mt-1">
-                Koristi zamenske oznake:&nbsp;
-                {'{{ime}}'}, {'{{brand}}'}, {'{{model}}'}, {'{{imei}}'}, {'{{rok}}'}, {'{{opis}}'}, {'{{status}}'}, {'{{order_id}}'}, {'{{company}}'}
-              </p>
+        <div className="fixed inset-0 bg-indigo-950/40 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl p-8">
+            <div className="flex justify-between items-center mb-8">
+              <h2 className="text-2xl font-black text-indigo-950 uppercase">Podešavanja</h2>
+              <button onClick={() => setShowModal('')} className="p-3 hover:bg-slate-100 rounded-2xl transition"><X/></button>
             </div>
-
-            <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <div className="mb-2 font-semibold">Naziv firme (biće ubačen umesto {'{{company}}'})</div>
-                <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="w-full p-2 border rounded mb-3" />
-
-                <div className="mb-2 font-semibold">Sample preview context (možeš promeniti)</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-                  <input value={previewCtx.ime} onChange={(e) => setPreviewCtx(prev => ({ ...prev, ime: e.target.value }))} className="p-2 border rounded" />
-                  <input value={previewCtx.brand} onChange={(e) => setPreviewCtx(prev => ({ ...prev, brand: e.target.value }))} className="p-2 border rounded" />
-                  <input value={previewCtx.model} onChange={(e) => setPreviewCtx(prev => ({ ...prev, model: e.target.value }))} className="p-2 border rounded" />
-                  <input value={previewCtx.imei} onChange={(e) => setPreviewCtx(prev => ({ ...prev, imei: e.target.value }))} className="p-2 border rounded" />
-                  <input value={previewCtx.rok} onChange={(e) => setPreviewCtx(prev => ({ ...prev, rok: e.target.value }))} className="p-2 border rounded" />
-                  <input value={previewCtx.order_id} onChange={(e) => setPreviewCtx(prev => ({ ...prev, order_id: e.target.value }))} className="p-2 border rounded" />
-                </div>
-
-                <div className="mb-2 font-semibold">primljen</div>
-                <textarea className="w-full p-2 border rounded mb-2 h-28" value={templates.primljen} onChange={(e) => setTemplates(prev => ({ ...prev, primljen: e.target.value }))} />
-                <div className="p-2 bg-gray-50 border rounded text-sm whitespace-pre-wrap">{previewFor('primljen')}</div>
-
-                <div className="mt-4 mb-2 font-semibold">neuspeh</div>
-                <textarea className="w-full p-2 border rounded mb-2 h-20" value={templates.neuspeh} onChange={(e) => setTemplates(prev => ({ ...prev, neuspeh: e.target.value }))} />
-                <div className="p-2 bg-gray-50 border rounded text-sm whitespace-pre-wrap">{previewFor('neuspeh')}</div>
-
-                <div className="mt-4 mb-2 font-semibold">zavrsen</div>
-                <textarea className="w-full p-2 border rounded mb-2 h-20" value={templates.zavrsen} onChange={(e) => setTemplates(prev => ({ ...prev, zavrsen: e.target.value }))} />
-                <div className="p-2 bg-gray-50 border rounded text-sm whitespace-pre-wrap">{previewFor('zavrsen')}</div>
+            <div className="space-y-6">
+              <input value={companyName} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-bold" onChange={e => setCompanyName(e.target.value)} />
+              <div className="grid md:grid-cols-2 gap-6">
+                {['primljen', 'zavrsen', 'neuspeh'].map((key) => (
+                  <div key={key} className="space-y-2">
+                    <label className="text-xs font-black text-indigo-400 uppercase tracking-widest">Poruka: {key}</label>
+                    <textarea value={templates[key]} className="w-full p-4 bg-slate-50 border-2 rounded-2xl h-40 text-sm" onChange={e => setTemplates({...templates, [key]: e.target.value})} />
+                  </div>
+                ))}
               </div>
-
-              <div>
-                <div className="mb-2 font-semibold">Kratka pomoć</div>
-                <div className="text-sm text-gray-600 space-y-2">
-                  <div>- U preview kontekstu promeni vrednosti da vidiš kako poruka izgleda.</div>
-                  <div>- Klikni "Sačuvaj" da upišeš poruke i naziv firme u bazu (preporučeno: tabela wa_templates mora postojati).</div>
-                  <div>- Ako želiš dodatne placeholders, reci pa dodam i u replacePlaceholders.</div>
-                </div>
-
-                <div className="mt-6">
-                  <button onClick={() => saveTemplates(templates)} className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white py-2 rounded-lg mb-2">Sačuvaj</button>
-                  <button onClick={() => { setShowModal(''); fetchTemplates(); }} className="w-full border py-2 rounded-lg">Zatvori</button>
-                </div>
-              </div>
+              <button onClick={saveTemplates} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-lg shadow-xl uppercase">Sačuvaj</button>
             </div>
-
           </div>
         </div>
       )}
